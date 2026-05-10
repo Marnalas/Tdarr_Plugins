@@ -63,21 +63,21 @@ const details = () => ({
       + ' Enable this option to only downmix a single track.',
   },
   {
-    name: "codec",
-    name: "codec_6channels",
+    name: 'codec',
+    name: 'codec_6channels',
     type: 'string',
     defaultValue: 'ac3',
     inputUI: {
       type: 'dropdown',
       options: [
-        'aac'
-        , 'ac3'
-        , 'eac3'
-        , 'dts'
-        , 'flac'
-        , 'mp2'
-        , 'mp3'
-        , 'truehd'
+        'aac',
+        'ac3',
+        'eac3',
+        'dts',
+        'flac',
+        'mp2',
+        'mp3',
+        'truehd',
       ],
     },
     tooltip: `Specify the codec you'd like to transcode into for audio tracks with 6 channels.
@@ -85,21 +85,21 @@ const details = () => ({
               eac3`,
   },
   {
-    name: "codec",
-    name: "codec_2channels",
+    name: 'codec',
+    name: 'codec_2channels',
     type: 'string',
     defaultValue: 'aac',
     inputUI: {
       type: 'dropdown',
       options: [
-        'aac'
-        , 'ac3'
-        , 'eac3'
-        , 'dts'
-        , 'flac'
-        , 'mp2'
-        , 'mp3'
-        , 'truehd'
+        'aac',
+        'ac3',
+        'eac3',
+        'dts',
+        'flac',
+        'mp2',
+        'mp3',
+        'truehd',
       ],
     },
     tooltip: `Specify the codec you'd like to transcode into for audio tracks with 2 channels. Will be ignored if aac_stereo is set to true.
@@ -125,8 +125,8 @@ const details = () => ({
       + ' the new layout to the original title'
       + ' (e.g. "E-AC-3 Atmos 5.1 - 2.0").'
       + ' \\nExample:\\n\nfalse\n\n\\nExample:\\n\ntrue',
-  }
-  ]
+  },
+  ],
 });
 
 // Build a downmix title that appends the new channel layout, but avoids
@@ -169,9 +169,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
   const safeToLowerCase = (stringInput, defaultValue = '') => stringInput?.toLowerCase() ?? defaultValue;
   const safeToLowerCaseLanguage = (language) => safeToLowerCase(language, 'und');
-  const resolveEncoder = (encoder) => encoder === 'mp3' ? 'libmp3lame' : (encoder === 'dts' ? 'dca' : encoder);
+  const resolveEncoder = (encoder) => (encoder === 'mp3' ? 'libmp3lame' : (encoder === 'dts' ? 'dca' : encoder));
 
-  //Set up inputs.
+  // Set up inputs.
   const aacStereo = inputs?.aac_stereo ?? false;
   const downmix = inputs?.downmix ?? false;
   const downmixSingleTrack = inputs?.downmix_single_track ?? false;
@@ -180,22 +180,25 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
   // Set up required variables.
   let ffmpegCommandInsert = '';
-  const audioStreams = file.ffProbeData.streams.filter(stream => safeToLowerCase(stream.codec_type) === 'audio');
+  const audioStreams = file.ffProbeData.streams.filter((stream) => safeToLowerCase(stream.codec_type) === 'audio');
   let convert = false;
   let is2channelAdded = false;
   let is6channelAdded = false;
 
   // Set up different kinds of downmixing.
   const audioStreamDownmixes = {
-    from8chTo6ch: { currentChannels: 8, targetedChannels: 6, encoder: codec6channels, targetedChannelsLayout: '5.1' },
-    from6chTo2ch: { currentChannels: 6, targetedChannels: 2, encoder: codec2channels, targetedChannelsLayout: '2.0' }
+    from8chTo6ch: {
+      currentChannels: 8, targetedChannels: 6, encoder: codec6channels, targetedChannelsLayout: '5.1',
+    },
+    from6chTo2ch: {
+      currentChannels: 6, targetedChannels: 2, encoder: codec2channels, targetedChannelsLayout: '2.0',
+    },
   };
   const addDownmixedAudioStream = (audioStream, audioStreamIndex, audioStreamDownmix, channelsAdded) => {
     let isStreamAdded = false;
     if (audioStream.channels === audioStreamDownmix.currentChannels && (!downmixSingleTrack || (downmixSingleTrack && !channelsAdded))) {
       // No downmixing if an audio stream is found with the targeted number of channels and the correct language.
-      const downmixedStream = audioStreams.find(existingAudioStream =>
-        existingAudioStream.channels === audioStreamDownmix.targetedChannels
+      const downmixedStream = audioStreams.find((existingAudioStream) => existingAudioStream.channels === audioStreamDownmix.targetedChannels
         && safeToLowerCaseLanguage(existingAudioStream.tags?.language)
           === safeToLowerCaseLanguage(audioStream.tags?.language));
       if (downmixedStream === undefined) {
@@ -216,7 +219,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
       }
     }
     return isStreamAdded;
-  }
+  };
 
   // Go through each audio stream in the file.
   audioStreams.forEach((audioStream, audioStreamIndex) => {
@@ -234,11 +237,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
   // Convert file if convert variable is set to true.
   response.processFile = convert;
-  if (convert)
+  if (convert) {
     response.preset = `, -map 0 -c:v copy -c:a copy ${ffmpegCommandInsert} `
       + '-strict -2 -c:s copy -max_muxing_queue_size 9999 ';
-  else
-    response.infoLog += '☑File contains all required audio formats. \n';
+  } else response.infoLog += '☑File contains all required audio formats. \n';
 
   return response;
 };
