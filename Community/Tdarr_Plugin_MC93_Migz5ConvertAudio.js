@@ -63,7 +63,6 @@ const details = () => ({
       + ' Enable this option to only downmix a single track.',
   },
   {
-    name: 'codec',
     name: 'codec_6channels',
     type: 'string',
     defaultValue: 'ac3',
@@ -85,7 +84,6 @@ const details = () => ({
               eac3`,
   },
   {
-    name: 'codec',
     name: 'codec_2channels',
     type: 'string',
     defaultValue: 'aac',
@@ -203,7 +201,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
           === safeToLowerCaseLanguage(audioStream.tags?.language));
       if (downmixedStream === undefined) {
         const newTitle = inputs.preserve_channel_title
-          ? buildDownmixTitle(originalTitle, audioStreamDownmix.targetedChannelsLayout)
+          ? buildDownmixTitle(audioStream.tags?.title, audioStreamDownmix.targetedChannelsLayout)
           : audioStreamDownmix.targetedChannelsLayout;
         ffmpegCommandInsert += `-map 0:${audioStream.index} -c:a:${audioStreamIndex} `
           + `${audioStreamDownmix.encoder} -ac:a:${audioStreamIndex} ${audioStreamDownmix.targetedChannels} `
@@ -211,7 +209,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         // Preserve language if it exists
         const language = audioStream.tags?.language;
         if (language) {
-          ffmpegCommandInsert += `-metadata:s:a:${audioIdx} "language=${language}" `;
+          ffmpegCommandInsert += `-metadata:s:a:${audioStreamIndex} "language=${language}" `;
         }
         response.infoLog += `☒Creating ${audioStreamDownmix.targetedChannels} channel from ${audioStreamDownmix.currentChannels} channel for language ${safeToLowerCaseLanguage(language)}. \n`;
         convert = true;
