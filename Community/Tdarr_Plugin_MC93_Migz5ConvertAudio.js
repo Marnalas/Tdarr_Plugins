@@ -6,7 +6,7 @@ const details = () => ({
   Type: 'Audio',
   Operation: 'Transcode',
   Description: 'This plugin can convert any 2.0 audio track/s to AAC and can create downmixed audio tracks. \n\n',
-  Version: '2.4',
+  Version: '2.6',
   Tags: 'pre-processing,ffmpeg,audio only,configurable',
   Inputs: [{
     name: 'aac_stereo',
@@ -105,9 +105,44 @@ const details = () => ({
     tooltip: `Specify the codec you'd like to transcode into for audio tracks with 2 channels. Will be ignored if aac_stereo is set to true.
             \\nExample:\\n
             aac`,
+  },
+  {
+    name: 'preserve_channel_title',
+    type: 'boolean',
+    defaultValue: false,
+    inputUI: {
+      type: 'dropdown',
+      options: [
+        'false',
+        'true',
+      ],
+    },
+    tooltip: 'Specify whether downmixed tracks should preserve the original track title.'
+      + ' \\nWhen false (default), the plugin keeps the pre-#903 behaviour.'
+      + ' \\nDownmixed tracks use only the new channel layout as the title'
+      + ' (e.g. "2.0" or "5.1").'
+      + ' \\nWhen true, the plugin restores the PR #903 behaviour and appends'
+      + ' the new layout to the original title'
+      + ' (e.g. "E-AC-3 Atmos 5.1 - 2.0").'
+      + ' \\nExample:\\n\nfalse\n\n\\nExample:\\n\ntrue',
   }
   ]
 });
+
+// Build a downmix title that appends the new channel layout, but avoids
+// appending a layout the source title already ends with (e.g. don't turn
+// "Anglais E-AC3 2.0" into "Anglais E-AC3 2.0 - 2.0"). The boundary check
+// uses [^0-9.] so any non-digit/non-dot character (whitespace, paren,
+// bracket, dash, etc.) terminates the layout cleanly without matching
+// substrings of larger numbers like "15.1" or "12.0".
+const buildDownmixTitle = (originalTitle, layout) => {
+  if (!originalTitle) return layout;
+  const escaped = layout.replace(/\./g, '\\.');
+  if (new RegExp(`(?:^|[^0-9.])${escaped}$`).test(originalTitle)) {
+    return originalTitle;
+  }
+  return `${originalTitle} - ${layout}`;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const plugin = (file, librarySettings, inputs, otherArguments) => {
@@ -159,11 +194,23 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     let isStreamAdded = false;
     if (audioStream.channels === audioStreamDownmix.currentChannels && (!downmixSingleTrack || (downmixSingleTrack && !channelsAdded))) {
       // No downmixing if an audio stream is found with the targeted number of channels and the correct language.
-      const downmixedStream = audioStreams.find(existingAudioStream => existingAudioStream.channels === audioStreamDownmix.targetedChannels && safeToLowerCaseLanguage(existingAudioStream.tags?.language) === safeToLowerCaseLanguage(audioStream.tags?.language));
+      const downmixedStream = audioStreams.find(existingAudioStream =>
+        existingAudioStream.channels === audioStreamDownmix.targetedChannels
+        && safeToLowerCaseLanguage(existingAudioStream.tags?.language)
+          === safeToLowerCaseLanguage(audioStream.tags?.language));
       if (downmixedStream === undefined) {
-        const addedStreamTitle = `${audioStreamDownmix.targetedChannelsLayout} from ${audioStream.tags?.title?.replace(/"/g, '') ?? ''}`;
-        ffmpegCommandInsert += `-map 0:${audioStream.index} -c:a:${audioStreamIndex} ${audioStreamDownmix.encoder} -ac:a:${audioStreamIndex} ${audioStreamDownmix.targetedChannels} -metadata:s:a:${audioStreamIndex} title="${addedStreamTitle}" `;
-        response.infoLog += `☒Creating ${audioStreamDownmix.targetedChannels} channel from ${audioStreamDownmix.currentChannels} channel for language ${safeToLowerCaseLanguage(audioStream.tags?.language)}. \n`;
+        const newTitle = inputs.preserve_channel_title
+          ? buildDownmixTitle(originalTitle, audioStreamDownmix.targetedChannelsLayout)
+          : audioStreamDownmix.targetedChannelsLayout;
+        ffmpegCommandInsert += `-map 0:${audioStream.index} -c:a:${audioStreamIndex} `
+          + `${audioStreamDownmix.encoder} -ac:a:${audioStreamIndex} ${audioStreamDownmix.targetedChannels} `
+          + `-metadata:s:a:${audioStreamIndex} title="${newTitle}" `;
+        // Preserve language if it exists
+        const language = audioStream.tags?.language;
+        if (language) {
+          ffmpegCommandInsert += `-metadata:s:a:${audioIdx} "language=${language}" `;
+        }
+        response.infoLog += `☒Creating ${audioStreamDownmix.targetedChannels} channel from ${audioStreamDownmix.currentChannels} channel for language ${safeToLowerCaseLanguage(language)}. \n`;
         convert = true;
         isStreamAdded = true;
       }
