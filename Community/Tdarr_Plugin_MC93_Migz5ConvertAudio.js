@@ -205,7 +205,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
           : audioStreamDownmix.targetedChannelsLayout;
         ffmpegCommandInsert += `-map 0:${audioStream.index} -c:a:${audioStreamIndex} `
           + `${audioStreamDownmix.encoder} -ac:a:${audioStreamIndex} ${audioStreamDownmix.targetedChannels} `
-          + `-metadata:s:a:${audioStreamIndex} title="${newTitle}" `;
+          + `-metadata:s:a:${audioStreamIndex} "title=${newTitle}" `;
         // Preserve language if it exists
         const language = audioStream.tags?.language;
         if (language) {
