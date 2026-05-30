@@ -5,6 +5,10 @@ import {
 } from '../../../../FlowHelpers/1.0.0/interfaces/interfaces';
 import { getFileName } from '../../../../FlowHelpers/1.0.0/fileUtils';
 
+module.exports.dependencies = [
+  'iso639-js@1.1.3',
+];
+
 /* eslint no-plusplus: ["error", { "allowForLoopAfterthoughts": true }] */
 
 // ===== CONSTANTS =====
@@ -13,16 +17,12 @@ const DEFAULT_SEASON = 1;
 const DEFAULT_EPISODE = 1;
 const DEFAULT_EPISODE_ID = '1';
 const DEFAULT_LANGUAGE_CODE = 'und';
-const LANGUAGE_API_TIMEOUT = 5000;
 const ARR_API_TIMEOUT = 10000;
 
 const API_HEADERS = {
   'Content-Type': 'application/json',
   Accept: 'application/json',
 } as const;
-
-// eslint-disable-next-line max-len
-const LANGUAGE_API_BASE_URL = 'https://data.opendatasoft.com/api/explore/v2.1/catalog/datasets/iso-language-codes-639-1-and-639-2@public/records';
 
 // ===== INTERFACES =====
 interface IBaseResponse {
@@ -70,8 +70,13 @@ const details = (): IpluginDetails => ({
   name: 'Set Flow Variables From Radarr Or Sonarr',
   description: 'Set Flow Variables From Radarr or Sonarr. The variables set are : '
     + 'ArrId (internal id for Radarr or Sonarr), '
-    + 'ArrOriginalLanguageCode (code of the orignal language (ISO 639-2) as know by Radarr or Sonarr), '
-    + 'ArrProfileLanguageCode (code of the orignal language (ISO 639-2) as know by Radarr or Sonarr), '
+    + 'ArrOriginalLanguageCode (primary original language code (ISO 639-2) as known by Radarr or Sonarr), '
+    + 'ArrOriginalLanguageCodes (comma-separated string of ISO 639-2 language codes, '
+    + 'including the primary and associated language codes), '
+    + 'ArrProfileLanguageCode (primary original language code (ISO 639-2) as known by Radarr or Sonarr), '
+    + 'ArrProfileLanguageCodes (comma-separated string of ISO 639-2 language codes, '
+    + 'including the primary and associated language codes), '
+    + 'including the maco-language code and associated individual language codes), '
     + 'ArrSeasonNumber (the season number of the episode), '
     + 'ArrEpisodeNumber (the episode number).',
   style: {
@@ -411,61 +416,19 @@ const parseContent = async (
   }
 };
 
-const languageCodeCache = new Map<string, string>();
-
-/**
- * Fetches ISO 639-2 language code from language name using external API
- * Implements caching to avoid redundant API calls
- * @param args - Plugin input arguments
- * @param languageName - The language name to look up
- * @returns ISO 639-2 (alpha3_b) language code or DEFAULT_LANGUAGE_CODE
- */
-const getLanguageCode = async (args: IpluginInputArgs, languageName: string): Promise<string> => {
-  if (!languageName || languageName.trim() === '') {
-    return '';
-  }
-
-  const normalizedName = languageName.trim().toLowerCase();
-  const cachedValue = languageCodeCache.get(normalizedName);
-  if (cachedValue !== undefined) {
-    return cachedValue;
-  }
-
-  try {
-    const url = `${LANGUAGE_API_BASE_URL}?select=alpha3_b&where=english%20%3D%20%22${
-      encodeURIComponent(languageName)
-    }%22&limit=1`;
-
-    const { data } = await args.deps.axios({
-      method: 'get',
-      url,
-      timeout: LANGUAGE_API_TIMEOUT,
-    });
-    const languageCode = data.results?.[0]?.alpha3_b ?? DEFAULT_LANGUAGE_CODE;
-
-    // Cache the result
-    languageCodeCache.set(normalizedName, languageCode);
-
-    return languageCode;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    args.jobLog(`Failed to fetch language code for "${languageName}": ${errorMessage}`);
-    return DEFAULT_LANGUAGE_CODE;
-  }
-};
-
 /**
  * Sets flow variables based on file information from Radarr/Sonarr
- * Uses parallel language code fetching for better performance
  * @param args - Plugin input arguments
  * @param fileInfo - The file information to set variables from
  */
-const setVariables = async (
+const setVariables = (
   args: IpluginInputArgs,
   fileInfo: IFileInfo,
-): Promise<void> => {
+) => {
   // eslint-disable-next-line no-param-reassign
   args.variables.user = args.variables.user || {};
+
+  const { getISO639part2Languages } = require('../../../../FlowHelpers/1.0.0/iso639Helper');
 
   // Set common variables
   // eslint-disable-next-line no-param-reassign
@@ -473,9 +436,14 @@ const setVariables = async (
   args.jobLog(`Setting variable ArrId to ${args.variables.user.ArrId}`);
 
   if (fileInfo.type === 'sonarr') {
+    const originalLanguageCodes: string[] = getISO639part2Languages(fileInfo.originalLanguageName || '');
     // eslint-disable-next-line no-param-reassign
-    args.variables.user.ArrOriginalLanguageCode = await getLanguageCode(args, fileInfo.originalLanguageName ?? '');
+    args.variables.user.ArrOriginalLanguageCode = originalLanguageCodes[0] ?? '';
     args.jobLog(`Setting variable ArrOriginalLanguageCode to ${args.variables.user.ArrOriginalLanguageCode}`);
+
+    // eslint-disable-next-line no-param-reassign
+    args.variables.user.ArrOriginalLanguageCodes = originalLanguageCodes.join(',');
+    args.jobLog(`Setting variable ArrOriginalLanguageCodes to ${args.variables.user.ArrOriginalLanguageCodes}`);
 
     // eslint-disable-next-line no-param-reassign
     args.variables.user.ArrSeasonNumber = String(fileInfo.seasonNumber);
@@ -489,34 +457,38 @@ const setVariables = async (
     args.variables.user.ArrEpisodeId = fileInfo.episodeId;
     args.jobLog(`Setting variable ArrEpisodeId to ${args.variables.user.ArrEpisodeId}`);
   } else if (fileInfo.type === 'radarr') {
-    let originalLanguageCode = '';
-    let profileLanguageCode = '';
+    let originalLanguageCodes: string[] = [];
+    let profileLanguageCodes: string[] = [];
 
     switch ((fileInfo.profileLanguageName ?? '').toLowerCase()) {
       case 'original':
         args.jobLog('Profile language is "Original", using original language');
-        originalLanguageCode = await getLanguageCode(args, fileInfo.originalLanguageName ?? '');
-        profileLanguageCode = originalLanguageCode;
+        originalLanguageCodes = getISO639part2Languages(fileInfo.originalLanguageName || '');
+        profileLanguageCodes = originalLanguageCodes;
         break;
       case 'any':
-        args.jobLog('Profile language is "Any", setting to "und" (undetermined)');
-        originalLanguageCode = await getLanguageCode(args, fileInfo.originalLanguageName ?? '');
-        profileLanguageCode = 'und';
+        args.jobLog(`Profile language is "Any", setting to "${DEFAULT_LANGUAGE_CODE}" (undetermined`);
+        originalLanguageCodes = getISO639part2Languages(fileInfo.originalLanguageName || '');
+        profileLanguageCodes = [DEFAULT_LANGUAGE_CODE];
         break;
       default:
-        [originalLanguageCode, profileLanguageCode] = await Promise.all([
-          getLanguageCode(args, fileInfo.originalLanguageName ?? ''),
-          getLanguageCode(args, fileInfo.profileLanguageName ?? ''),
-        ]);
+        originalLanguageCodes = getISO639part2Languages(fileInfo.originalLanguageName || '');
+        profileLanguageCodes = getISO639part2Languages(fileInfo.profileLanguageName || '');
         break;
     }
 
     // eslint-disable-next-line no-param-reassign
-    args.variables.user.ArrOriginalLanguageCode = originalLanguageCode;
-    args.jobLog(`Setting variable ArrOriginalLanguageCode to ${originalLanguageCode}`);
+    args.variables.user.ArrOriginalLanguageCode = originalLanguageCodes[0] ?? '';
+    args.jobLog(`Setting variable ArrOriginalLanguageCode to ${args.variables.user.ArrOriginalLanguageCode}`);
     // eslint-disable-next-line no-param-reassign
-    args.variables.user.ArrProfileLanguageCode = profileLanguageCode;
-    args.jobLog(`Setting variable ArrProfileLanguageCode to ${profileLanguageCode}`);
+    args.variables.user.ArrOriginalLanguageCodes = originalLanguageCodes.join(',');
+    args.jobLog(`Setting variable ArrOriginalLanguageCodes to ${args.variables.user.ArrOriginalLanguageCodes}`);
+    // eslint-disable-next-line no-param-reassign
+    args.variables.user.ArrProfileLanguageCode = profileLanguageCodes[0] ?? '';
+    args.jobLog(`Setting variable ArrProfileLanguageCode to ${args.variables.user.ArrProfileLanguageCode}`);
+    // eslint-disable-next-line no-param-reassign
+    args.variables.user.ArrProfileLanguageCodes = profileLanguageCodes.join(',');
+    args.jobLog(`Setting variable ArrProfileLanguageCodes to ${args.variables.user.ArrProfileLanguageCodes}`);
   }
 };
 
@@ -532,6 +504,7 @@ const plugin = async (args: IpluginInputArgs): Promise<IpluginOutputArgs> => {
   const lib = require('../../../../../methods/lib')();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars,no-param-reassign
   args.inputs = lib.loadDefaultValues(args.inputs, details);
+  await args.installClassicPluginDeps(module.exports.dependencies); // required for iso639Helper.
 
   try {
     const config: IArrConfig = {
@@ -575,7 +548,7 @@ const plugin = async (args: IpluginInputArgs): Promise<IpluginOutputArgs> => {
     // Set variables if content was found
     if (fileInfo.id !== NOT_FOUND_ID && fileInfo.type !== 'unknown') {
       args.jobLog(`Successfully found content with ID: ${fileInfo.id}`);
-      await setVariables(args, fileInfo);
+      setVariables(args, fileInfo);
 
       return {
         outputFileObj: args.inputFileObj,
